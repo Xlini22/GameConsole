@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
+using System.Threading;
 
 enum MapId
 {
@@ -16,15 +18,24 @@ enum MapId
 
 class Program
 {
-    static Player player = new Player { X = 4, Y = 4 };
+    static Player player = new Player { X = 4, Y = 4, MaxHp = 100, Hp = 100 };
     static MapData currentMap;
     static MapId currentMapId = MapId.Overworld;
     static readonly List<Npc> npcs = new List<Npc>();
     static Enemy enemy;
     static string ultimoMessaggio = "Barra spaziatrice per parlare con NPC o porte.";
     static int lastDx = 0, lastDy = 0;
+    static int tickCounter = 0;
+    static bool enemyAggro = false;
+    static DateTime lastEnemyHit = DateTime.MinValue;
     const int EnemyCollisionRange = 2;
-    const int EnemyGreetRange = 5;
+    const int EnemyGreetRange = 15;
+    const int EnemyAggroStart = 5;
+    const int EnemyAggroLose = 20;
+    const int EnemyMoveInterval = 4; // move every 4 ticks (più lento)
+    const int FrameDelayMs = 16; // ~60fps target
+    const int EnemyTouchDamage = 5;
+    const int EnemyDamageCooldownMs = 500;
     const int NpcGreetRange = 4;
     const int NpcCollisionRange = 2;
 
@@ -35,8 +46,15 @@ class Program
 
         while (true)
         {
+            var frameStart = DateTime.UtcNow;
+
+            AggiornaNemico();
             Disegna();
-            Muovi();
+            GestisciInput();
+
+            int elapsed = (int)(DateTime.UtcNow - frameStart).TotalMilliseconds;
+            if (elapsed < FrameDelayMs)
+                Thread.Sleep(FrameDelayMs - elapsed);
         }
     }
 
@@ -54,11 +72,13 @@ class Program
         {
             InizializzaNpcs();
             InizializzaNpcsInterni(null); // nessun interno per overworld, pulizia
-            enemy = new Enemy("Nemico", 90, 40, "Ehi, non avvicinarti troppo!");
+            enemy = new Enemy("Nemico", 90, 40, "Ehi, non avvicinarti troppo!", 60);
+            enemyAggro = false;
         }
         else
         {
             enemy = null;
+            enemyAggro = false;
             InizializzaNpcsInterni(id);
         }
     }
@@ -365,59 +385,84 @@ class Program
         int startX = Clamp(player.X - viewWidth / 2, 0, Math.Max(0, mapWidth - viewWidth));
         int startY = Clamp(player.Y - viewHeight / 2, 0, Math.Max(0, mapHeight - viewHeight));
 
-        Console.SetCursorPosition(0, 0);
-
+        // buffer
+        char[,] buf = new char[viewHeight, viewWidth];
         for (int y = 0; y < viewHeight; y++)
         {
-            int mapY = startY + y;
-
+            int my = startY + y;
             for (int x = 0; x < viewWidth; x++)
             {
-                int mapX = startX + x;
-
-                if (enemy != null && enemy.X == mapX && enemy.Y == mapY)
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.Write('E');
-                    Console.ResetColor();
-                }
-                else if (TryGetDoorAt(mapX, mapY, out _))
-                {
-                    Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.Write('+');
-                    Console.ResetColor();
-                }
-                else
-                {
-                    Console.Write(mappa[mapY, mapX]);
-                }
+                int mx = startX + x;
+                buf[y, x] = mappa[my, mx];
             }
-
-            if (y < viewHeight - 1)
-                Console.WriteLine();
         }
 
-        DisegnaSprite(startX, startY, viewWidth, viewHeight);
+        // NPC
+        foreach (var npc in npcs)
+            BlitSprite(buf, viewWidth, viewHeight, npc.X - startX, npc.Y - startY, 'N');
 
-        Console.SetCursorPosition(0, viewHeight);
+        // Enemy
+        if (enemy != null)
+            BlitSprite(buf, viewWidth, viewHeight, enemy.X - startX, enemy.Y - startY, 'E');
+
+        // Player
+        BlitSprite(buf, viewWidth, viewHeight, player.X - startX, player.Y - startY, '@');
+
+        // balloons
+        foreach (var npc in npcs)
+        {
+            int dist = Math.Abs(npc.X - player.X) + Math.Abs(npc.Y - player.Y);
+            if (dist <= NpcGreetRange)
+                BlitBalloon(buf, viewWidth, viewHeight, npc.X - startX, npc.Y - startY, npc.Messaggio);
+        }
+        if (enemy != null && !enemyAggro)
+        {
+            int dist = Math.Abs(enemy.X - player.X) + Math.Abs(enemy.Y - player.Y);
+            if (dist <= EnemyGreetRange)
+                BlitBalloon(buf, viewWidth, viewHeight, enemy.X - startX, enemy.Y - startY, enemy.Messaggio);
+        }
+
+        // write buffer once
+        Console.SetCursorPosition(0, 0);
+        var sb = new StringBuilder(viewWidth * (viewHeight + 2));
+        for (int y = 0; y < viewHeight; y++)
+        {
+            for (int x = 0; x < viewWidth; x++) sb.Append(buf[y, x]);
+            if (y < viewHeight - 1) sb.Append('\n');
+        }
+        Console.Write(sb.ToString());
+
+        // disegna sprite colorati (3 linee) sopra il buffer
+        foreach (var npc in npcs)
+            DrawColoredSprite(npc.X - startX, npc.Y - startY, StickSprite, ConsoleColor.Green, viewWidth, viewHeight);
+
+        if (enemy != null)
+            DrawColoredSprite(enemy.X - startX, enemy.Y - startY, StickSprite, ConsoleColor.Red, viewWidth, viewHeight);
+
+        int screenPX = player.X - startX;
+        int screenPY = player.Y - startY;
+        DrawColoredSprite(screenPX, screenPY, StickSprite, ConsoleColor.White, viewWidth, viewHeight);
+        DrawHealthBarAt(screenPX, screenPY + 2, player.Hp, player.MaxHp, viewWidth);
+
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write($"Pos {player.X},{player.Y}  Mappa {mapWidth}x{mapHeight}  WASD/Frecce movimento  SPAZIO interagisci");
-        if (Console.CursorLeft < Console.WindowWidth)
-            Console.Write(new string(' ', Console.WindowWidth - Console.CursorLeft));
+        Console.SetCursorPosition(0, viewHeight);
+        string hud = $"Pos {player.X},{player.Y}  HP {player.Hp}/{player.MaxHp}  Mappa {mapWidth}x{mapHeight}  Aggro {(enemyAggro ? "ON" : "OFF")}";
+        if (hud.Length > viewWidth) hud = hud.Substring(0, viewWidth);
+        Console.Write(hud.PadRight(viewWidth));
         Console.ResetColor();
 
-        Console.SetCursorPosition(0, viewHeight + 1);
         Console.ForegroundColor = ConsoleColor.Gray;
+        Console.SetCursorPosition(0, viewHeight + 1);
         string msg = ultimoMessaggio ?? string.Empty;
-        if (msg.Length > Console.WindowWidth) msg = msg.Substring(0, Console.WindowWidth - 1);
-        Console.Write(msg);
-        if (Console.CursorLeft < Console.WindowWidth)
-            Console.Write(new string(' ', Console.WindowWidth - Console.CursorLeft));
+        if (msg.Length > viewWidth) msg = msg.Substring(0, viewWidth);
+        Console.Write(msg.PadRight(viewWidth));
         Console.ResetColor();
     }
 
-    static void Muovi()
+    static void GestisciInput()
     {
+        if (!Console.KeyAvailable) return;
+
         ConsoleKey key = Console.ReadKey(true).Key;
 
         int dx = 0, dy = 0;
@@ -454,6 +499,8 @@ class Program
         player.Y = newY;
 
         TriggerDoorIfOnTile();
+
+        AggiornaNemico();
     }
 
     static void Interagisci()
@@ -554,12 +601,60 @@ class Program
                     return true;
                 if (IsNpcBlocking(x, y))
                     return true;
-                if (enemy != null && Math.Abs(enemy.X - x) + Math.Abs(enemy.Y - y) <= EnemyCollisionRange)
-                    return true;
             }
         }
 
         return false;
+    }
+
+    static bool CanEnemyMoveTo(int centerX, int centerY)
+    {
+        int half = 1;
+        if (centerX - half < 0 || centerY - half < 0 || centerX + half >= currentMap.Width || centerY + half >= currentMap.Height)
+            return false;
+
+        // evitare sovrapposizione diretta al player
+        if (centerX == player.X && centerY == player.Y) return false;
+
+        for (int y = centerY - half; y <= centerY + half; y++)
+        {
+            for (int x = centerX - half; x <= centerX + half; x++)
+            {
+                int manhattan = Math.Abs(x - centerX) + Math.Abs(y - centerY);
+                if (manhattan > 1) continue;
+
+                char tile = currentMap.Tiles[y, x];
+                if (tile == '#' || tile == '^' || tile == 'T' || tile == '/' || tile == '\\' || tile == '~')
+                    return false;
+
+                // evita NPC hitbox
+                foreach (var npc in npcs)
+                    if (Math.Abs(npc.X - x) + Math.Abs(npc.Y - y) <= NpcCollisionRange)
+                        return false;
+            }
+        }
+
+        return true;
+    }
+
+    static void ProvaDannoNemico()
+    {
+        var now = DateTime.UtcNow;
+        if ((now - lastEnemyHit).TotalMilliseconds < EnemyDamageCooldownMs)
+            return;
+
+        player.Hp = Math.Max(0, player.Hp - EnemyTouchDamage);
+        lastEnemyHit = now;
+        ultimoMessaggio = $"Sei stato colpito! HP: {player.Hp}/{player.MaxHp}";
+
+        if (player.Hp <= 0)
+        {
+            Console.Clear();
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Sei morto. Game Over.");
+            Console.ResetColor();
+            Environment.Exit(0);
+        }
     }
 
     static void TriggerDoorIfOnTile()
@@ -577,112 +672,72 @@ class Program
         }
     }
 
-    static void DisegnaSprite(int viewStartX, int viewStartY, int viewWidth, int viewHeight)
+    static void AggiornaNemico()
     {
-        int px = player.X - viewStartX;
-        int py = player.Y - viewStartY;
-        if (px < 0 || px >= viewWidth || py < 0 || py >= viewHeight) return;
+        if (enemy == null) return;
 
-        string[] sprite = GetPlayerSpriteLines();
-        for (int i = 0; i < sprite.Length; i++)
+        int dist = Math.Abs(enemy.X - player.X) + Math.Abs(enemy.Y - player.Y);
+        if (!enemyAggro && dist <= EnemyAggroStart) enemyAggro = true;
+        if (enemyAggro && dist > EnemyAggroLose) { enemyAggro = false; return; }
+        if (!enemyAggro) return;
+
+        // danno a contatto
+        if (dist <= 1)
         {
-            int drawY = py - 1 + i; // linea centrale sul tile del player
-            if (drawY < 0 || drawY >= viewHeight) continue;
-
-            int drawX = px - 1; // sprite largo 3 caratteri
-            for (int c = 0; c < sprite[i].Length; c++)
-            {
-                int sx = drawX + c;
-                if (sx < 0 || sx >= viewWidth) continue;
-
-                Console.SetCursorPosition(sx, drawY);
-                Console.ForegroundColor = ConsoleColor.White;
-                Console.Write(sprite[i][c]);
-                Console.ResetColor();
-            }
+            ProvaDannoNemico();
+            return; // non muove se è già in contatto
         }
 
-        // NPC sprite (verde) + balloon se vicino
-        foreach (var npc in npcs)
-        {
-            int nx = npc.X - viewStartX;
-            int ny = npc.Y - viewStartY;
-            if (nx >= 0 && nx < viewWidth && ny >= 0 && ny < viewHeight)
-            {
-                DrawSpriteAt(nx, ny, sprite, ConsoleColor.Green, viewWidth, viewHeight);
+        // rallenta il passo: muove solo ogni EnemyMoveInterval frame di input
+        tickCounter = (tickCounter + 1) % EnemyMoveInterval;
+        if (tickCounter != 0) return;
 
-                int dist = Math.Abs(npc.X - player.X) + Math.Abs(npc.Y - player.Y);
-                if (dist <= NpcGreetRange)
-                    DrawBalloon(nx, ny, npc.Messaggio, ConsoleColor.Green, viewWidth, viewHeight);
-            }
+        int dx = Math.Sign(player.X - enemy.X);
+        int dy = Math.Sign(player.Y - enemy.Y);
+
+        // prova asse con distanza maggiore prima
+        var moves = new List<(int dx, int dy)>();
+        if (Math.Abs(player.X - enemy.X) >= Math.Abs(player.Y - enemy.Y))
+        {
+            moves.Add((dx, 0));
+            moves.Add((0, dy));
+        }
+        else
+        {
+            moves.Add((0, dy));
+            moves.Add((dx, 0));
         }
 
-        // Enemy sprite (rosso) se in viewport
-        if (enemy != null)
+        foreach (var m in moves)
         {
-            int ex = enemy.X - viewStartX;
-            int ey = enemy.Y - viewStartY;
-            if (ex >= 0 && ex < viewWidth && ey >= 0 && ey < viewHeight)
+            int nx = enemy.X + m.dx;
+            int ny = enemy.Y + m.dy;
+            if (CanEnemyMoveTo(nx, ny))
             {
-                DrawSpriteAt(ex, ey, sprite, ConsoleColor.Red, viewWidth, viewHeight);
-
-                // Balloon se il player è vicino
-                int dist = Math.Abs(enemy.X - player.X) + Math.Abs(enemy.Y - player.Y);
-                if (dist <= EnemyGreetRange)
-                {
-                    DrawBalloon(ex, ey, enemy.Messaggio, ConsoleColor.Red, viewWidth, viewHeight);
-                }
-            }
-        }
-
-        // Player sprite (bianco) sopra tutti
-        DrawSpriteAt(px, py, sprite, ConsoleColor.White, viewWidth, viewHeight);
-    }
-
-    static void DrawSpriteAt(int centerX, int centerY, string[] sprite, ConsoleColor color, int viewWidth, int viewHeight)
-    {
-        for (int i = 0; i < sprite.Length; i++)
-        {
-            int drawY = centerY - 1 + i;
-            if (drawY < 0 || drawY >= viewHeight) continue;
-
-            int drawX = centerX - 1;
-            for (int c = 0; c < sprite[i].Length; c++)
-            {
-                int sx = drawX + c;
-                if (sx < 0 || sx >= viewWidth) continue;
-
-                Console.SetCursorPosition(sx, drawY);
-                Console.ForegroundColor = color;
-                Console.Write(sprite[i][c]);
-                Console.ResetColor();
+                enemy.X = nx;
+                enemy.Y = ny;
+                break;
             }
         }
     }
 
-    static void DrawBalloon(int centerX, int centerY, string message, ConsoleColor color, int viewWidth, int viewHeight)
+    static void BlitBalloon(char[,] buf, int vw, int vh, int cx, int cy, string text)
     {
-        if (string.IsNullOrEmpty(message)) return;
-        int maxWidth = Math.Min(viewWidth, 30);
-        var lines = WrapText(message, maxWidth);
-        int topY = centerY - GetPlayerSpriteLines().Length - lines.Count;
+        if (string.IsNullOrEmpty(text)) return;
+        var lines = WrapText(text, Math.Min(30, vw));
+        int topY = cy - 2 - lines.Count;
         if (topY < 0) return;
-
-        for (int li = 0; li < lines.Count; li++)
+        for (int i = 0; i < lines.Count; i++)
         {
-            string line = $"({lines[li]})";
-            int bx = centerX - line.Length / 2;
-            int by = topY + li;
-            if (by < 0 || by >= viewHeight) continue;
-
-            for (int i = 0; i < line.Length; i++)
+            string line = $"({lines[i]})";
+            int bx = cx - line.Length / 2;
+            int by = topY + i;
+            if (by < 0 || by >= vh) continue;
+            for (int c = 0; c < line.Length; c++)
             {
-                int sx = bx + i;
-                if (sx < 0 || sx >= viewWidth) continue;
-                Console.SetCursorPosition(sx, by);
-                Console.ForegroundColor = color;
-                Console.Write(line[i]);
-                Console.ResetColor();
+                int x = bx + c;
+                if (x < 0 || x >= vw) continue;
+                buf[by, x] = line[c];
             }
         }
     }
@@ -690,39 +745,75 @@ class Program
     static List<string> WrapText(string text, int maxWidth)
     {
         var lines = new List<string>();
-        string[] words = text.Split(' ');
-        var current = new System.Text.StringBuilder();
-        foreach (var word in words)
+        var words = text.Split(' ');
+        var current = new StringBuilder();
+        foreach (var w in words)
         {
-            if (current.Length + word.Length + (current.Length > 0 ? 1 : 0) > maxWidth)
+            if (current.Length + w.Length + (current.Length > 0 ? 1 : 0) > maxWidth)
             {
                 if (current.Length > 0)
                 {
                     lines.Add(current.ToString());
                     current.Clear();
                 }
-
-                if (word.Length > maxWidth)
+                if (w.Length > maxWidth)
                 {
-                    for (int i = 0; i < word.Length; i += maxWidth)
-                        lines.Add(word.Substring(i, Math.Min(maxWidth, word.Length - i)));
+                    for (int i = 0; i < w.Length; i += maxWidth)
+                        lines.Add(w.Substring(i, Math.Min(maxWidth, w.Length - i)));
                 }
-                else
-                {
-                    current.Append(word);
-                }
+                else current.Append(w);
             }
             else
             {
                 if (current.Length > 0) current.Append(' ');
-                current.Append(word);
+                current.Append(w);
             }
         }
         if (current.Length > 0) lines.Add(current.ToString());
         return lines;
     }
 
-    static string[] GetPlayerSpriteLines() => new[] { " O ", "/|\\", "/ \\" };
+    static readonly string[] StickSprite = { " O ", "/|\\", "/ \\" };
+
+    static void BlitSprite(char[,] buf, int vw, int vh, int cx, int cy, char glyph)
+    {
+        if (cx < 0 || cy < 0 || cx >= vw || cy >= vh) return;
+        buf[cy, cx] = glyph;
+    }
+
+    static void DrawColoredSprite(int cx, int cy, string[] sprite, ConsoleColor color, int vw, int vh)
+    {
+        for (int i = 0; i < sprite.Length; i++)
+        {
+            int sy = cy - 1 + i;
+            if (sy < 0 || sy >= vh) continue;
+            for (int c = 0; c < sprite[i].Length; c++)
+            {
+                int sx = cx - 1 + c;
+                if (sx < 0 || sx >= vw) continue;
+                Console.SetCursorPosition(sx, sy);
+                Console.ForegroundColor = color;
+                Console.Write(sprite[i][c]);
+            }
+        }
+        Console.ResetColor();
+    }
+
+    static void DrawHealthBarAt(int cx, int y, int hp, int maxHp, int vw)
+    {
+        if (y < 0 || y >= Console.WindowHeight) return;
+        int width = Math.Min(12, vw);
+        hp = Math.Max(0, Math.Min(hp, maxHp));
+        int filled = (int)Math.Round((double)hp / Math.Max(1, maxHp) * width);
+        int startX = Math.Max(0, cx - width / 2);
+        if (startX + width > vw) startX = Math.Max(0, vw - width);
+        Console.SetCursorPosition(startX, y);
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write(new string('█', filled));
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write(new string('░', width - filled));
+        Console.ResetColor();
+    }
 
     static int Clamp(int value, int min, int max)
     {

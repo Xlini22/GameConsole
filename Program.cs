@@ -13,7 +13,8 @@ enum MapId
     Officina,
     CasaNord,
     CasaSud,
-    Torre
+    Torre,
+    Ospedale
 }
 
 class Program
@@ -97,6 +98,7 @@ class Program
             MapId.CasaNord => (32, 18),
             MapId.CasaSud => (32, 18),
             MapId.Torre => (36, 20),
+            MapId.Ospedale => (48, 24),
             _ => (120, 40)
         };
 
@@ -120,6 +122,7 @@ class Program
             MapId.CasaNord => BuildHouse("Casa Nord", id, 39, 67),
             MapId.CasaSud => BuildHouse("Casa Sud", id, 118, 77),
             MapId.Torre => BuildHouse("Torre", id, 199, 84),
+            MapId.Ospedale => BuildHouse("Ospedale", id, 75, 84),
             _ => BuildOverworld()
         };
     }
@@ -149,6 +152,7 @@ class Program
         RegistraEdificio(map, 30, 55, 18, 12, "Casa Nord", MapId.CasaNord);
         RegistraEdificio(map, 110, 65, 16, 12, "Casa Sud", MapId.CasaSud);
         RegistraEdificio(map, 190, 70, 18, 14, "Torre", MapId.Torre);
+        RegistraOspedale(map, 60, 74, MapId.Ospedale);
 
         // Parchi/boschi
         AggiungiRettangolo(map, 15, 40, 25, 10, 'T');
@@ -345,6 +349,53 @@ class Program
         // Nessuna insegna extra: solo il nome nel template
     }
 
+    static void RegistraOspedale(MapData map, int startX, int startY, MapId targetMap)
+    {
+        var mappa = map.Tiles;
+        string[] tpl =
+        {
+            "            [Ospedale] ",
+            "         _________________",
+            "---------|      ┌─┐      |---------",
+            "|        |    ┌─┘ └─┐    |        |",
+            "| []  [] |    └─┐ ┌─┘    | []  [] |",
+            "| []  [] |      └─┘      | []  [] |",
+            "|        |  [] [] [] []  |        |",
+            "| []  [] |               | []  [] |",
+            "| []  [] |   _________   | []  [] |",
+            "|        |   |   |   |   |        |",
+            "|________|___|_^^|_^^|___|________|"
+        };
+
+        int tplH = tpl.Length;
+        int maxW = 0; foreach (var l in tpl) maxW = Math.Max(maxW, l.Length);
+
+        for (int ty = 0; ty < tplH; ty++)
+        {
+            int y = startY + ty;
+            if (y >= map.Height - 1) break;
+            var line = tpl[ty];
+            for (int tx = 0; tx < line.Length; tx++)
+            {
+                int x = startX + tx;
+                if (x >= map.Width - 1) break;
+                char ch = line[tx];
+                if (ch == '^' && tx + 1 < line.Length && line[tx + 1] == '^')
+                {
+                    mappa[y, x] = '^';
+                    mappa[y, x + 1] = '^';
+                    map.Doors.Add(new Door { X = x, Y = y, TargetMap = targetMap, TargetX = GetInteriorSpawn(targetMap).X, TargetY = GetInteriorSpawn(targetMap).Y });
+                    map.Doors.Add(new Door { X = x + 1, Y = y, TargetMap = targetMap, TargetX = GetInteriorSpawn(targetMap).X, TargetY = GetInteriorSpawn(targetMap).Y });
+                    tx++;
+                    continue;
+                }
+                mappa[y, x] = ch;
+                if (ch != ' ')
+                    buildingBlocks.Add((x, y));
+            }
+        }
+    }
+
     static void InizializzaNpcs()
     {
         // NPC posizionati fuori dagli edifici
@@ -386,6 +437,9 @@ class Program
                 break;
             case MapId.Magazzino:
                 npcs.Add(new Npc("Magazziniere", cx, cy, "Attento alle casse.", true));
+                break;
+            case MapId.Ospedale:
+                npcs.Add(new Npc("Dottore", cx, cy, "Seguimi in ambulatorio.", true));
                 break;
         }
     }

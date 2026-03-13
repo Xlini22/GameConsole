@@ -20,10 +20,10 @@ enum MapId
 class Program
 {
     static Player player = new Player { X = 4, Y = 4, MaxHp = 100, Hp = 100 };
-    static MapData currentMap;
+    static MapData currentMap = null!;
     static MapId currentMapId = MapId.Overworld;
     static readonly List<Npc> npcs = new List<Npc>();
-    static Enemy enemy;
+    static Enemy? enemy;
     // Celle solide degli edifici (indipendenti dal carattere usato per le strade)
     static readonly HashSet<(int x, int y)> buildingBlocks = new HashSet<(int, int)>();
     static string ultimoMessaggio = "Barra spaziatrice per parlare con NPC o porte.";
@@ -144,9 +144,9 @@ class Program
         DisegnaStradaVerticale(map, 150, 5, map.Height - 6);
 
         // Edifici con porte registrate
-        RegistraEdificio(map, 8, 8, 18, 12, "Municipio", MapId.Municipio);
+        RegistraMunicipio(map, 8, 8);
         RegistraEdificio(map, 40, 10, 16, 10, "Bottega", MapId.Bottega);
-        RegistraEdificio(map, 90, 6, 22, 14, "Magazzino", MapId.Magazzino);
+        RegistraMagazzino(map, 90, 6, MapId.Magazzino);
         RegistraEdificio(map, 130, 15, 18, 12, "Locanda", MapId.Locanda);
         RegistraEdificio(map, 170, 35, 20, 14, "Officina", MapId.Officina);
         RegistraEdificio(map, 30, 55, 18, 12, "Casa Nord", MapId.CasaNord);
@@ -395,6 +395,50 @@ class Program
             }
         }
     }
+    static void RegistraMagazzino(MapData map, int startX, int startY, MapId targetMap)
+    {
+        var mappa = map.Tiles;
+        string[] tpl =
+        {
+            "              [Magazzino]",
+            "        ________________________ ",
+            "      / \\                       \\ ",
+            "    /     \\                       \\ ",
+            "  /         \\                       \\ ",
+            "/_____________\\_______________________\\",
+            "| [] []  [] [] |  [] [] []  [] [] []   |",
+            "|  __________  |    _______________    |",
+            "|  |        |  |    |             |    |",
+            "|  |        |  |    |             |    |",
+            "|__|___^^___|__|____|______^^_____|____|"
+        };
+
+        for (int ty = 0; ty < tpl.Length; ty++)
+        {
+            int y = startY + ty;
+            if (y >= map.Height - 1) break;
+            var line = tpl[ty];
+            for (int tx = 0; tx < line.Length; tx++)
+            {
+                int x = startX + tx;
+                if (x >= map.Width - 1) break;
+                char ch = line[tx];
+                if (ch == '^' && tx + 1 < line.Length && line[tx + 1] == '^')
+                {
+                    mappa[y, x] = '^';
+                    mappa[y, x + 1] = '^';
+                    map.Doors.Add(new Door { X = x, Y = y, TargetMap = targetMap, TargetX = GetInteriorSpawn(targetMap).X, TargetY = GetInteriorSpawn(targetMap).Y });
+                    map.Doors.Add(new Door { X = x + 1, Y = y, TargetMap = targetMap, TargetX = GetInteriorSpawn(targetMap).X, TargetY = GetInteriorSpawn(targetMap).Y });
+                    tx++;
+                    continue;
+                }
+                mappa[y, x] = ch;
+                if (ch != ' ') buildingBlocks.Add((x, y));
+            }
+        }
+    }
+
+
 
     static void InizializzaNpcs()
     {
@@ -604,7 +648,7 @@ class Program
         ultimoMessaggio = "Nessuna interazione disponibile.";
     }
 
-    static bool TryGetNpcAt(int x, int y, out Npc npc)
+    static bool TryGetNpcAt(int x, int y, out Npc? npc)
     {
         foreach (var n in npcs)
         {
@@ -619,7 +663,7 @@ class Program
         return false;
     }
 
-    static bool TryGetDoorAt(int x, int y, out Door door)
+    static bool TryGetDoorAt(int x, int y, out Door? door)
     {
         foreach (var d in currentMap.Doors)
         {
@@ -737,7 +781,7 @@ class Program
     static void TriggerDoorIfOnTile()
     {
         if (lastDy == 0) return;
-        if (TryGetDoorAt(player.X, player.Y, out var door))
+        if (TryGetDoorAt(player.X, player.Y, out var door) && door != null)
         {
             bool ok = (currentMapId == MapId.Overworld && lastDy == -1) ||
                       (currentMapId != MapId.Overworld && lastDy == 1);
@@ -897,5 +941,45 @@ class Program
         if (value < min) return min;
         if (value > max) return max;
         return value;
+    }
+
+    static void RegistraMunicipio(MapData map, int startX, int startY)
+    {
+        var mappa = map.Tiles;
+        string[] municipioTemplate = new[]
+        {
+            "         [Municipio]",
+            "                  |‾‾‾|",
+            "                  |‾‾‾",
+            "            __--__ǀ",
+            "      __--‾‾      ‾‾--__",
+            "__--‾‾                  ‾‾--__",
+            "|‾‾‾|‾‾‾|‾‾‾|‾‾‾‾|‾‾‾|‾‾‾|‾‾‾|",
+            " | |‾‾‾‾‾| |‾‾‾‾‾‾| |‾‾‾‾‾| |",
+            " | |     | |[]  []| |     | |",
+            " | |[] []| |      | |[] []| |",
+            " | |     | | ____ | |     | |",
+            " | |     | | |  | | |     | |",
+            " |_|_____| |_|^^|_| |_____|_|",
+            " -----------------------------",
+            "‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾"
+        };
+
+        for (int y = 0; y < municipioTemplate.Length; y++)
+        {
+            string line = municipioTemplate[y];
+            for (int x = 0; x < line.Length; x++)
+            {
+                char ch = line[x];
+                int mapX = startX + x;
+                int mapY = startY + y;
+                if (mapX < map.Width && mapY < map.Height)
+                {
+                    mappa[mapY, mapX] = ch;
+                    if (ch != ' ')
+                        buildingBlocks.Add((mapX, mapY));
+                }
+            }
+        }
     }
 }

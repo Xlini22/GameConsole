@@ -23,6 +23,8 @@ class Program
     static MapId currentMapId = MapId.Overworld;
     static readonly List<Npc> npcs = new List<Npc>();
     static Enemy enemy;
+    // Celle solide degli edifici (indipendenti dal carattere usato per le strade)
+    static readonly HashSet<(int x, int y)> buildingBlocks = new HashSet<(int, int)>();
     static string ultimoMessaggio = "Barra spaziatrice per parlare con NPC o porte.";
     static int lastDx = 0, lastDy = 0;
     static int tickCounter = 0;
@@ -106,6 +108,7 @@ class Program
 
     static MapData BuildMap(MapId id)
     {
+        buildingBlocks.Clear();
         return id switch
         {
             MapId.Overworld => BuildOverworld(),
@@ -318,6 +321,9 @@ class Program
                     continue;
                 }
                 mappa[y, x] = ch;
+                // Tutto ciò che non è spazio diventa solido per le collisioni, eccetto la porta
+                if (ch != ' ')
+                    buildingBlocks.Add((x, y));
             }
         }
 
@@ -607,6 +613,9 @@ class Program
                 if (TryGetDoorAt(x, y, out _))
                     continue;
 
+                if (buildingBlocks.Contains((x, y)))
+                    return true;
+
                 char tile = currentMap.Tiles[y, x];
                 if (tile == '#' || tile == '^' || tile == 'T' || tile == '/' || tile == '\\' || tile == '~')
                     return true;
@@ -633,6 +642,9 @@ class Program
             {
                 int manhattan = Math.Abs(x - centerX) + Math.Abs(y - centerY);
                 if (manhattan > 1) continue;
+
+                if (buildingBlocks.Contains((x, y)))
+                    return false;
 
                 char tile = currentMap.Tiles[y, x];
                 if (tile == '#' || tile == '^' || tile == 'T' || tile == '/' || tile == '\\' || tile == '~')

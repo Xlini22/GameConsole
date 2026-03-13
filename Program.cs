@@ -247,85 +247,96 @@ class Program
     static void RegistraEdificio(MapData map, int startX, int startY, int width, int height, string label, MapId targetMap)
     {
         var mappa = map.Tiles;
+        int tplMinWidth = 24; // larghezza minima per il template ASCII
+        int effWidth = Math.Max(width, tplMinWidth);
+        int effHeight = Math.Max(height, 12);
+
         int roofY = startY;
         int wallTop = startY + 1;
-        int wallBottom = startY + height - 1;
+        int wallBottom = Math.Min(map.Height - 2, startY + effHeight - 1);
         int wallLeft = startX;
-        int wallRight = startX + width - 1;
-        int doorX = wallLeft + width / 2;
-        int doorY = wallBottom;
+        int wallRight = Math.Min(map.Width - 2, startX + effWidth - 1);
 
-        // Tetto e cornice
-        for (int x = wallLeft; x <= wallRight && x < map.Width - 1; x++)
+        string labelLine = $"[{label}]";
+        string[] template = new[]
         {
-            char ch = '^';
-            if (x == wallLeft) ch = '/';
-            else if (x == wallRight) ch = '\\';
-            mappa[roofY, x] = ch;
-        }
+            "",
+            "",
+            "            ^    ___",
+            "          /   \\  | |",
+            "        /       \\| |",
+            "      /    ___    \\|",
+            "    /      |_|      \\",
+            "  / |               | \\",
+            "    |         ____  |",
+            "    |  ____   |  |  |",
+            "    |  |  |  _|__|_ |",
+            "    |  |  |         |",
+            "    |__|^^|_________|"
+        };
 
-        int tetto2 = roofY + 1;
-        if (tetto2 < map.Height - 1)
-            for (int x = wallLeft; x <= wallRight && x < map.Width - 1; x++)
+        int tplH = template.Length;
+        int tplW = 0;
+        foreach (var line in template) tplW = Math.Max(tplW, line.Length);
+
+        int destTop = roofY;
+        int destLeft = wallLeft + Math.Max(0, (effWidth - tplW) / 2);
+
+        for (int ty = 0; ty < tplH; ty++)
+        {
+            int y = destTop + ty;
+            if (y >= map.Height - 1) break;
+            var line = template[ty];
+            for (int tx = 0; tx < line.Length; tx++)
             {
-                char ch = (x == wallLeft) ? '/' : (x == wallRight ? '\\' : '~');
-                mappa[tetto2, x] = ch;
+                int x = destLeft + tx;
+                if (x >= map.Width - 1 || x > wallRight) break;
+                char ch = line[tx];
+                if (ch == '^' && tx + 1 < line.Length && line[tx + 1] == '^')
+                {
+                    int left = x;
+                    int right = x + 1;
+                    mappa[y, left] = '^';
+                    mappa[y, right] = '^';
+                    map.Doors.Add(new Door
+                    {
+                        X = left,
+                        Y = y,
+                        TargetMap = targetMap,
+                        TargetX = GetInteriorSpawn(targetMap).X,
+                        TargetY = GetInteriorSpawn(targetMap).Y
+                    });
+                    map.Doors.Add(new Door
+                    {
+                        X = right,
+                        Y = y,
+                        TargetMap = targetMap,
+                        TargetX = GetInteriorSpawn(targetMap).X,
+                        TargetY = GetInteriorSpawn(targetMap).Y
+                    });
+                    tx++; // skip second ^
+                    continue;
+                }
+                mappa[y, x] = ch;
             }
+        }
 
-        // Muri esterni pieni
-        for (int y = tetto2 + 1; y <= wallBottom && y < map.Height - 1; y++)
-            for (int x = wallLeft; x <= wallRight && x < map.Width - 1; x++)
-            {
-                bool bordo = y == tetto2 + 1 || y == wallBottom || x == wallLeft || x == wallRight;
-                mappa[y, x] = bordo ? '|' : '#'; // interno non visibile
-            }
-
-        // Finestre multiple su due file
-        void DisegnaFinestra(int fx, int fy)
+        // centra il nome sull'apice del tetto (^)
+        int caretLocal = template[2].IndexOf('^');
+        if (caretLocal >= 0)
         {
-            if (fx >= wallLeft + 1 && fx + 1 < wallRight && fy < map.Height && fy > roofY + 1)
+            int caretGlobal = destLeft + caretLocal;
+            int labelStart = caretGlobal - labelLine.Length / 2;
+            int y = destTop; // prima riga
+            for (int i = 0; i < labelLine.Length; i++)
             {
-                mappa[fy, fx] = '[';
-                mappa[fy, fx + 1] = ']';
+                int x = labelStart + i;
+                if (x < wallLeft || x > wallRight || x >= map.Width - 1 || x < 0) continue;
+                mappa[y, x] = labelLine[i];
             }
         }
 
-        int finestraY1 = tetto2 + 2;
-        int finestraY2 = tetto2 + 4;
-        if (finestraY1 < wallBottom)
-        {
-            for (int fx = wallLeft + 2; fx < wallRight - 1; fx += 3)
-                DisegnaFinestra(fx, finestraY1);
-        }
-        if (finestraY2 < wallBottom)
-        {
-            for (int fx = wallLeft + 1; fx < wallRight - 1; fx += 3)
-                DisegnaFinestra(fx, finestraY2);
-        }
-
-        // Porta centrale
-        if (doorY < map.Height && doorX < map.Width)
-        {
-            mappa[doorY, doorX] = 'H';
-            if (doorY - 1 >= wallTop) mappa[doorY - 1, doorX] = 'H';
-            map.Doors.Add(new Door
-            {
-                X = doorX,
-                Y = doorY,
-                TargetMap = targetMap,
-                TargetX = GetInteriorSpawn(targetMap).X,
-                TargetY = GetInteriorSpawn(targetMap).Y
-            });
-        }
-
-        // Insegna
-        if (!string.IsNullOrEmpty(label))
-        {
-            int textStart = Math.Max(wallLeft + 1, Math.Min(wallRight - label.Length, wallLeft + 1));
-            if (textStart < wallRight && wallTop + 1 < map.Height - 1)
-                for (int i = 0; i < label.Length && textStart + i < wallRight; i++)
-                    mappa[wallTop + 1, textStart + i] = label[i];
-        }
+        // Nessuna insegna extra: solo il nome nel template
     }
 
     static void InizializzaNpcs()

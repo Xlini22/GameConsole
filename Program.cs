@@ -138,26 +138,24 @@ class Program
                 tiles[y, x] = (y == 0 || y == map.Height - 1 || x == 0 || x == map.Width - 1) ? '#' : ' ';
 
         // Strade principali con corsie e linea tratteggiata
-        DisegnaStradaOrizzontale(map, 30, 2, map.Width - 3);
-        DisegnaStradaOrizzontale(map, 60, 5, map.Width - 6);
-        DisegnaStradaVerticale(map, 70, 2, map.Height - 3);
-        DisegnaStradaVerticale(map, 150, 5, map.Height - 6);
+        DisegnaStradaOrizzontale(map, 30, 1, map.Width - 2);
+        DisegnaStradaOrizzontale(map, 60, 1, map.Width - 2);
+        DisegnaStradaVerticale(map, 70, 1, map.Height - 2);
+        DisegnaStradaVerticale(map, 150, 1, map.Height - 2);
 
         // Edifici con porte registrate
-        RegistraMunicipio(map, 8, 8);
-        RegistraEdificio(map, 40, 10, 16, 10, "Bottega", MapId.Bottega);
-        RegistraMagazzino(map, 90, 6, MapId.Magazzino);
-        RegistraEdificio(map, 130, 15, 18, 12, "Locanda", MapId.Locanda);
+        RegistraMunicipio(map, 13, 13);
+        RegistraOspedale(map, 85, 47, MapId.Ospedale);
+        RegistraMagazzino(map, 90, 17, MapId.Magazzino);
+        RegistraEdificio(map, 40, 34, 16, 10, "Bottega", MapId.Bottega);
+        RegistraEdificio(map, 122, 34, 18, 12, "Locanda", MapId.Locanda);
         RegistraEdificio(map, 170, 35, 20, 14, "Officina", MapId.Officina);
-        RegistraEdificio(map, 30, 55, 18, 12, "Casa Nord", MapId.CasaNord);
+        RegistraEdificio(map, 25, 62, 18, 12, "Casa Nord", MapId.CasaNord);
         RegistraEdificio(map, 110, 65, 16, 12, "Casa Sud", MapId.CasaSud);
         RegistraEdificio(map, 190, 70, 18, 14, "Torre", MapId.Torre);
-        RegistraOspedale(map, 60, 74, MapId.Ospedale);
 
         // Parchi/boschi
         AggiungiRettangolo(map, 15, 40, 25, 10, 'T');
-        AggiungiRettangolo(map, 75, 45, 18, 8, 'T');
-        AggiungiRettangolo(map, 145, 55, 24, 10, 'T');
 
         // Piazza centrale
         AggiungiRettangolo(map, 60, 25, 20, 8, '.');
